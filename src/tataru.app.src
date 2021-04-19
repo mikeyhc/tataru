@@ -1,0 +1,18 @@
+{application, tataru,
+ [{description, "A discord scheduling bot"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {tataru_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    mnesia,
+    cowboy,
+    gun
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["BSD 2 Clause"]},
+  {links, []}
+ ]}.
