@@ -17,6 +17,7 @@
                 token :: string(),
                 connection :: #connection{} | undefined,
                 heartbeat :: discord_heartbeat:ref() | undefined,
+                user_id :: binary() | undefined,
                 sequence :: integer() | undefined,
                 session_id :: binary() | undefined,
                 log :: file:io_device() | undefined
@@ -186,12 +187,23 @@ decode_msg(Msg, #state{log=Log}) ->
 handle_ws_message(Msg=#{<<"op">> := Op, <<"s">> := Seq}, State) ->
     handle_ws_message_(Op, Msg, State#state{sequence=Seq}).
 
-handle_ws_message_(0, #{<<"d">> := Msg}, State) ->
+handle_ws_message_(0, #{<<"d">> := Msg}, S0) ->
     % TODO compare session ids
     % TODO ensure we only use a single session ID
+    S1 = if S0#state.user_id =:= undefined ->
+           case maps:get(<<"user">>, Msg, undefined) of
+               undefined -> S0;
+               User ->
+                   SX = S0#state{user_id=maps:get(<<"id">>, User)},
+                   ?LOG_INFO("set user id to ~p", [SX#state.user_id]),
+                   SX
+           end;
+       true -> S0
+    end,
+    handle_mentions(Msg, S1),
     case maps:get(<<"session_id">>, Msg, undefined) of
-        undefined -> State;
-        SessionId -> State#state{session_id=SessionId}
+        undefined -> S1;
+        SessionId -> S1#state{session_id=SessionId}
     end;
 handle_ws_message_(7, _Msg, State) ->
     disconnect(State#state.connection, 1001, <<"reconnect">>),
@@ -212,8 +224,9 @@ send_message(#connection{pid=ConnPid, stream_ref=StreamRef}, OpCode, Msg) ->
     gun:ws_send(ConnPid, StreamRef,
                 {text, jsone:encode(#{<<"op">> => OpCode, <<"d">> => Msg})}).
 
-disconnect(#connection{pid=ConnPid, ref=MRef}, Code, Msg) ->
-    gun_ws:send(ConnPid, {close, Code, Msg}),
+disconnect(#connection{pid=ConnPid, stream_ref=StreamRef, ref=MRef},
+           Code, Msg) ->
+    gun_ws:send(ConnPid, StreamRef, {close, Code, Msg}),
     demonitor(MRef),
     ok = gun:shutdown(ConnPid).
 
@@ -244,3 +257,14 @@ connect(Next, State) ->
             {stop, ws_upgrade_failed, State}
     after 2000 -> {stop, timeout}
     end.
+
+handle_mentions(Msg=#{<<"mentions">> := Mentions}, #state{user_id=UID}) ->
+    Me = lists:filter(fun(#{<<"id">> := ID}) -> ID =:= UID end, Mentions),
+    if length(Me) > 0 ->
+           PluginServer = tataru_sup:get_plugin_server(),
+           plugin_server:broadcast(PluginServer, Msg);
+       true -> ok
+    end,
+    ok;
+handle_mentions(_Msg, _State) ->
+    ok.

@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/2, get_gateway/1]).
+-export([start_link/2, get_gateway/1, send_message/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(connection, {pid :: pid(),
@@ -22,6 +22,10 @@ start_link(Url, Token) ->
 -spec get_gateway(pid()) -> binary().
 get_gateway(Pid) ->
     gen_server:call(Pid, get_gateway).
+
+-spec send_message(pid(), binary(), binary()) -> ok.
+send_message(Pid, ChannelId, Message) ->
+    gen_server:cast(Pid, {send_message, ChannelId, Message}).
 
 %% gen_server callbacks
 
@@ -44,7 +48,11 @@ handle_cast(connect, S=#state{url=Url}) ->
     {ok, _Protocol} = gun:await_up(ConnPid),
     MRef = monitor(process, ConnPid),
     Conn = #connection{pid=ConnPid, ref=MRef},
-    {noreply, S#state{connection=Conn}}.
+    {noreply, S#state{connection=Conn}};
+handle_cast({send_message, ChannelId, Message}, S0) ->
+    ?LOG_INFO("sending message to ~p: ~p", [ChannelId, Message]),
+    S1 = send_message_(binary:bin_to_list(ChannelId), Message, S0),
+    {noreply, S1}.
 
 handle_info({gun_down, ConnPid, _, _, _},
             S=#state{connection=#connection{pid=ConnPid}}) ->
@@ -61,7 +69,6 @@ handle_info({'DOWN', MRef, process, ConnPid, Reason},
 
 read_body(ConnPid, StreamRef) ->
     % TODO handle non-200 status
-    ?LOG_INFO("reading body (~p:~p)", [ConnPid, StreamRef]),
     receive
         {gun_response, ConnPid, StreamRef, fin, _Status, _Headers} ->
             no_data;
@@ -71,7 +78,6 @@ read_body(ConnPid, StreamRef) ->
     end.
 
 receive_data(ConnPid, StreamRef, Acc) ->
-    ?LOG_INFO("receiving data"),
     receive
         {gun_data, ConnPid, StreamRef, nofin, Data} ->
             receive_data(ConnPid, StreamRef, <<Acc/binary, Data/binary>>);
@@ -80,3 +86,14 @@ receive_data(ConnPid, StreamRef, Acc) ->
     after 1000 -> throw(timeout)
     end.
 
+send_message_(ChannelId, Message,
+              S0=#state{connection=#connection{pid=ConnPid},
+                        token=Token}) ->
+    StreamRef = gun:post(ConnPid, "/api/channels/" ++ ChannelId ++ "/messages",
+                         [{<<"authorization">>, "Bot " ++ Token},
+                          {<<"content-type">>, <<"application/json">>}],
+                         jsone:encode(#{<<"content">> => Message,
+                                        <<"allowed_metions">> => [<<"users">>]
+                                       })),
+    read_body(ConnPid, StreamRef),
+    S0.
