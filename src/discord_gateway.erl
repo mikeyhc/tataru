@@ -226,7 +226,7 @@ send_message(#connection{pid=ConnPid, stream_ref=StreamRef}, OpCode, Msg) ->
 
 disconnect(#connection{pid=ConnPid, stream_ref=StreamRef, ref=MRef},
            Code, Msg) ->
-    gun_ws:send(ConnPid, StreamRef, {close, Code, Msg}),
+    gun:ws_send(ConnPid, StreamRef, {close, Code, Msg}),
     demonitor(MRef),
     ok = gun:shutdown(ConnPid).
 

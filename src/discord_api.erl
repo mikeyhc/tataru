@@ -34,12 +34,10 @@ init([Url, Token]) ->
     {ok, #state{url=Url, token=Token}}.
 
 handle_call(get_gateway, _From, State) ->
-    ?LOG_INFO("actually called"),
     #state{token=Token, connection=#connection{pid=ConnPid}} = State,
     Auth = "Bot " ++ Token,
     StreamRef = gun:get(ConnPid, "/api/gateway/bot",
                         [{<<"authorization">>, Auth}]),
-    ?LOG_INFO("did a get"),
     #{<<"url">> := Url} = jsone:decode(read_body(ConnPid, StreamRef)),
     {reply, Url, State}.
 
