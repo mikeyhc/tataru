@@ -73,7 +73,8 @@ send_reply(Reply, Message) ->
 
 atom_plugin(Plugin) ->
     try
-        {ok, erlang:binary_to_existing_atom(Plugin)}
+        PluginStr = binary:bin_to_list(Plugin),
+        {ok, list_to_existing_atom(PluginStr)}
     catch
         error:badarg -> {error, unknown_argument}
     end.
@@ -126,7 +127,8 @@ binjoin(A, B) -> <<A/binary, B/binary>>.
 list_plugins(Msg) ->
     PluginServer = tataru_sup:get_plugin_server(),
     {ok, Plugins} = plugin_server:list_plugins(PluginServer),
-    BinPlugins = lists:map(fun erlang:atom_to_binary/1, Plugins),
+    Fn = fun(X) -> binary:list_to_bin(atom_to_list(X)) end,
+    BinPlugins = lists:map(Fn, Plugins),
     PluginBin = lists:foldl(fun binjoin/2, <<>>,
                             lists:join(<<", ">>, BinPlugins)),
     send_reply(<<"Installed: ", PluginBin/binary>>, Msg).

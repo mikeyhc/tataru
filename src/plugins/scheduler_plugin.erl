@@ -372,7 +372,7 @@ date_to_binary({Y, M, D}) ->
   binary:list_to_bin(io_lib:format("~4..0w/~2..0w/~2..0w", [Y, M, D])).
 
 entry_bin(#schedule_entry{name=Name, time=Time, date=Date, frequency=Freq}) ->
-    BinFreq = erlang:atom_to_binary(Freq),
+    BinFreq = binary:list_to_bin(atom_to_list(Freq)),
     BinDate = date_to_binary(Date),
     BinTime = time_to_binary(Time),
     <<"  ", Name/binary, "(",  BinFreq/binary, ") starting on ", BinDate/binary,
