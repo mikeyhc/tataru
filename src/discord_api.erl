@@ -105,7 +105,7 @@ handle_cast({send_message, ChannelId, Message}, S0) ->
 handle_cast({send_reaction, ChannelId, MessageId, Reaction}, S0) ->
     ?LOG_INFO("sending reaction to ~s#~s: ~s",
               [ChannelId, MessageId, Reaction]),
-    S1 = send_reaction_(ChannelId, MessageId, Reaction, S0),
+    {S1, _} = send_reaction_(ChannelId, MessageId, Reaction, S0),
     {noreply, S1};
 handle_cast({create_role, GuildId, RoleName}, State) ->
     ?LOG_INFO("creating new role ~s#~s~n", [GuildId, RoleName]),
@@ -181,14 +181,12 @@ hput(Uri, #state{connection=Connection, token=Token}) ->
 send_message_(ChannelId, Message, State) ->
     Body = post("/api/channels/" ++ ChannelId ++ "/messages",
                 #{<<"content">> => Message,
-                  <<"allowed_metions">> => [<<"users">>]},
+                  <<"allowed_metions">> => [<<"users">>, <<"roles">>]},
                 State),
     {State, Body}.
 
-send_reaction_(ChannelId, MessageId, Reaction,
-               State=#state{connection=Connection}) ->
+send_reaction_(ChannelId, MessageId, Reaction, State) ->
     URI = uri_string:normalize(<<"/api/channels/", ChannelId/binary,
                                  "/messages/", MessageId/binary, "/reactions/",
                                  Reaction/binary, "/@me">>),
-    StreamRef = hput(URI, State),
-    {State, read_body(Connection, StreamRef)}.
+    {State, hput(URI, State)}.

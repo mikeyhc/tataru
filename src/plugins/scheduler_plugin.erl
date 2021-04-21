@@ -74,7 +74,6 @@ handle_cast({add, _, Msg}, State) ->
     send_reply(<<"not enough arguments to add">>, Msg),
     {noreply, State};
 handle_cast({react, Msg}, State) ->
-    ?LOG_INFO("got react message: ~p~n", [Msg]),
     handle_react(Msg),
     {noreply, State};
 handle_cast(start_timer, State) ->
@@ -255,10 +254,8 @@ schedule_message(ChannelId, MessageId) ->
     Message = discord_api:get_message(ApiServer, ChannelId, MessageId),
     #{<<"author">> := #{<<"id">> := AuthorId}} = Message,
     {ok, UserId} = discord_gateway:user_id(Gateway),
-    ?LOG_INFO("compare ~p to ~p", [UserId, AuthorId]),
     if UserId =:= AuthorId ->
            #{<<"content">> := Content} = Message,
-           ?LOG_INFO("got content: ~p", [Content]),
            case binary:split(Content, [<<" ">>], [global]) of
                [_,<<"schedule">>|Rest] -> parse_schedule_message(Rest);
                _ -> false
@@ -291,10 +288,11 @@ get_schedule_entries() ->
     end,
     mnesia:activity(transaction, Fn).
 
-should_fire(Now, #schedule_entry{time=Time}) ->
-    Diff = abs(calendar:time_to_seconds(Now) - calendar:time_to_seconds(Time)),
-    if Diff >= ?HOUR andalso Diff =< ?HOUR - 60 -> true;
-       Diff >= ?TEN_MINUTES andalso Diff =< ?TEN_MINUTES - 60 -> true;
+should_fire(Now, #schedule_entry{name=Name, time=Time}) ->
+    Diff = calendar:time_to_seconds(Time) - calendar:time_to_seconds(Now),
+    ?LOG_INFO("alert ~s has time diff ~p", [Name, Diff]),
+    if Diff =< ?HOUR + 60 andalso Diff > ?HOUR -> true;
+       Diff =< ?TEN_MINUTES + 60 andalso Diff > ?TEN_MINUTES -> true;
        true -> false
     end.
 
@@ -302,11 +300,13 @@ process_events() ->
     {_NDate, NTime} = calendar:local_time(),
     Entries = get_schedule_entries(),
     Current = lists:filter(fun(X) -> should_fire(NTime, X) end, Entries),
-    ChannelId = os:getenv("TATARU_SCHEDULE_CHANNEL"),
+    ChannelId = binary:list_to_bin(os:getenv("TATARU_SCHEDULE_CHANNEL")),
     lists:foreach(fun(X) -> fire_alert(ChannelId, X) end, Current).
 
-fire_alert(ChannelId, #schedule_entry{name=Name, time=Time}) ->
+fire_alert(ChannelId, #schedule_entry{name=Name, time={H, M, _}}) ->
+    ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
-    Alert = <<"<@!", RoleId/binary, "> comming up at ", Time/binary>>,
+    T = binary:list_to_bin(io_lib:format("~2..0w:~2..0w", [H, M])),
+    Alert = <<"<@&", RoleId/binary, "> comming up at ", T/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
