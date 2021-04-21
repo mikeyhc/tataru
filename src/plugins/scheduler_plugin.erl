@@ -361,7 +361,7 @@ fire_alert(ChannelId, #schedule_entry{name=Name, time=Time}) ->
     ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
     TimeBin = time_to_binary(Time),
-    Alert = <<"<@&", RoleId/binary, "> comming up at ", TimeBin/binary>>,
+    Alert = <<"<@&", RoleId/binary, "> coming up at ", TimeBin/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
 
