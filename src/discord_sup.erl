@@ -18,8 +18,8 @@ get_gateway() -> find_child(discord_gateway).
 
 init([DiscordUrl, DiscordToken]) ->
     SupFlags = #{strategy => one_for_all,
-                 intensity => 0,
-                 period => 1},
+                 intensity => 3,
+                 period => 60},
     ChildSpecs = [#{id => discord_api,
                     start => {discord_api, start_link,
                               [DiscordUrl, DiscordToken]}},

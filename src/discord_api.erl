@@ -4,7 +4,7 @@
 
 -export([start_link/2, get_gateway/1, send_message/3, send_message_reply/3,
          send_reaction/4, get_guild/2, get_roles/2, create_role/3,
-         get_message/3, get_user/2, add_member_role/4]).
+         get_message/3, get_user/2, add_member_role/4, delete_role/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(connection, {pid :: pid(),
@@ -60,6 +60,10 @@ get_user(Pid, UserId) ->
 -spec add_member_role(pid(), binary(), binary(), binary()) -> ok.
 add_member_role(Pid, GuildId, UserId, RoleId) ->
     gen_server:cast(Pid, {add_member_role, GuildId, UserId, RoleId}).
+
+-spec delete_role(pid(), binary(), binary()) -> ok.
+delete_role(Pid, GuildId, RoleId) ->
+    gen_server:cast(Pid, {delete_role, GuildId, RoleId}).
 
 %% gen_server callbacks
 
@@ -117,6 +121,11 @@ handle_cast({create_role, GuildId, RoleName}, State) ->
 handle_cast({add_member_role, GuildId, UserId, RoleId}, State) ->
     hput(<<"/api/guilds/", GuildId/binary, "/members/", UserId/binary,
            "/roles/", RoleId/binary>>, State),
+    {noreply, State};
+handle_cast({delete_role, GuildId, RoleId}, State) ->
+    ?LOG_INFO("deleting role ~s#~s~n", [GuildId, RoleId]),
+    hdelete(<<"/api/guilds/", GuildId/binary, "/roles/", RoleId/binary>>,
+            State),
     {noreply, State}.
 
 handle_info({gun_down, ConnPid, _, _, _},
@@ -173,6 +182,15 @@ hput(Uri, #state{connection=Connection, token=Token}) ->
     StreamRef= gun:put(Connection#connection.pid, Uri,
                        [{<<"authorization">>, "Bot " ++ Token},
                         {<<"content-length">>, <<"0">>}]),
+    case read_body(Connection, StreamRef) of
+        no_data -> no_data;
+        Data -> jsone:decode(Data)
+    end.
+
+hdelete(Uri, #state{connection=Connection, token=Token}) ->
+    StreamRef= gun:delete(Connection#connection.pid, Uri,
+                          [{<<"authorization">>, "Bot " ++ Token},
+                           {<<"content-length">>, <<"0">>}]),
     case read_body(Connection, StreamRef) of
         no_data -> no_data;
         Data -> jsone:decode(Data)

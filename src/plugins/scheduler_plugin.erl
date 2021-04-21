@@ -44,6 +44,10 @@ handle_command(_Pid, [<<"help">>|_], Msg) ->
     send_help(Msg);
 handle_command(Pid, [<<"add">>|Rest], Msg) ->
     gen_server:cast(Pid, {add, Rest, Msg});
+handle_command(Pid, [<<"list">>|_], Msg) ->
+    gen_server:cast(Pid, {list, Msg});
+handle_command(Pid, [<<"delete">>, Name], Msg) ->
+    gen_server:cast(Pid, {delete, Name, Msg});
 handle_command(_Pid, [Cmd|_], Msg) ->
     send_reply(<<"unknown command: ", Cmd/binary>>, Msg),
     send_help(Msg).
@@ -75,6 +79,20 @@ handle_cast({add, _, Msg}, State) ->
     {noreply, State};
 handle_cast({react, Msg}, State) ->
     handle_react(Msg),
+    {noreply, State};
+handle_cast({list, Msg}, State) ->
+    BinJoin = fun(X, Acc) -> <<Acc/binary, "\n", X/binary>> end,
+    BinEntries = lists:sort(lists:map(fun entry_bin/1, get_schedule_entries())),
+    Reply = lists:foldl(BinJoin, <<"Current Schedules:">>, BinEntries),
+    send_reply(Reply, Msg),
+    {noreply, State};
+handle_cast({delete, Name, Msg}, State) ->
+    case handle_delete_(Name) of
+        ok -> send_reply(<<"schedule ", Name/binary, " deleted">>, Msg);
+        {error, Error} ->
+            send_reply(<<"error deleting schedule ", Name/binary, ": ",
+                         Error/binary>>, Msg)
+    end,
     {noreply, State};
 handle_cast(start_timer, State) ->
     if State#state.timer =/= undefined ->
@@ -213,8 +231,18 @@ send_reaction(Reaction, #{<<"id">> := Id, <<"channel_id">> := ChannelId}) ->
 
 send_help(Message) ->
     Reply = <<"Scheduler Help\n\n",
-              "add {time} {date} {frequency} {name} - create a schedule called "
-              "{name}, starting on {date} at {time}, repeating with {frequency}"
+              "`add {time} {date} {frequency} {name}` - create a schedule "
+              "called `{name}`, starting on `{date}` at `{time}`, repeating "
+              "with `{frequency}`\n",
+              "`list` - show all current schedules\n",
+              "`delete {name}` - delete the schedule with name `{name}`\n\n",
+              "Examples:\n\n",
+              "To create a schedule called `sample` which will alert you "
+              "`daily` from the date `2021-04-21` an hour and 10 minutes before"
+              "`1540` you would do:\n",
+              "```\n",
+              "schedule add 1540 2021-04-21 daily sample\n",
+              "```\n"
             >>,
     send_reply(Reply, Message).
 
@@ -288,25 +316,88 @@ get_schedule_entries() ->
     end,
     mnesia:activity(transaction, Fn).
 
-should_fire(Now, #schedule_entry{name=Name, time=Time}) ->
-    Diff = calendar:time_to_seconds(Time) - calendar:time_to_seconds(Now),
-    ?LOG_INFO("alert ~s has time diff ~p", [Name, Diff]),
-    if Diff =< ?HOUR + 60 andalso Diff > ?HOUR -> true;
-       Diff =< ?TEN_MINUTES + 60 andalso Diff > ?TEN_MINUTES -> true;
-       true -> false
+alert_today(Today, #schedule_entry{date=Date, frequency=oneoff}) ->
+    Date =:= Today;
+alert_today(Today, #schedule_entry{date=Date, frequency=daily}) ->
+    TSec = calendar:date_to_gregorian_days(Today),
+    DSec = calendar:date_to_gregorian_days(Date),
+    DSec - TSec >= 0;
+alert_today(Today, #schedule_entry{date=Date, frequency=weekly}) ->
+    TSec = calendar:date_to_gregorian_days(Today),
+    DSec = calendar:date_to_gregorian_days(Date),
+    TDay = calendar:day_of_week(Today),
+    DDay = calendar:day_of_week(Date),
+    DSec - TSec >= 0 andalso TDay =:= DDay;
+alert_today(Today={_, _, TD}, #schedule_entry{date=Date, frequency=monthly}) ->
+    {_, _, DD} = Date,
+    TSec = calendar:date_to_gregorian_days(Today),
+    DSec = calendar:date_to_gregorian_days(Date),
+    DSec - TSec >= 0 andalso TD =:= DD.
+
+should_fire({NDate, NTime}, S=#schedule_entry{name=Name, time=Time}) ->
+    case alert_today(NDate, S) of
+        true ->
+            Diff = calendar:time_to_seconds(Time) -
+                calendar:time_to_seconds(NTime),
+            ?LOG_INFO("alert ~s is scheduled for today", [Name]),
+            ?LOG_INFO("alert ~s has time diff ~p", [Name, Diff]),
+            if Diff =< ?HOUR + 60 andalso Diff > ?HOUR -> true;
+               Diff =< ?TEN_MINUTES + 60 andalso Diff > ?TEN_MINUTES -> true;
+               true -> false
+            end;
+        false ->
+            ?LOG_INFO("alert ~s is NOT scheduled for today", [Name]),
+            ok
     end.
 
 process_events() ->
-    {_NDate, NTime} = calendar:local_time(),
+    Now = calendar:local_time(),
     Entries = get_schedule_entries(),
-    Current = lists:filter(fun(X) -> should_fire(NTime, X) end, Entries),
+    Current = lists:filter(fun(X) -> should_fire(Now, X) end, Entries),
     ChannelId = binary:list_to_bin(os:getenv("TATARU_SCHEDULE_CHANNEL")),
     lists:foreach(fun(X) -> fire_alert(ChannelId, X) end, Current).
 
-fire_alert(ChannelId, #schedule_entry{name=Name, time={H, M, _}}) ->
+fire_alert(ChannelId, #schedule_entry{name=Name, time=Time}) ->
     ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
-    T = binary:list_to_bin(io_lib:format("~2..0w:~2..0w", [H, M])),
-    Alert = <<"<@&", RoleId/binary, "> comming up at ", T/binary>>,
+    TimeBin = time_to_binary(Time),
+    Alert = <<"<@&", RoleId/binary, "> comming up at ", TimeBin/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
+
+time_to_binary({H, M, _}) ->
+  binary:list_to_bin(io_lib:format("~2..0w:~2..0w", [H, M])).
+
+date_to_binary({Y, M, D}) ->
+  binary:list_to_bin(io_lib:format("~4..0w/~2..0w/~2..0w", [Y, M, D])).
+
+entry_bin(#schedule_entry{name=Name, time=Time, date=Date, frequency=Freq}) ->
+    BinFreq = erlang:atom_to_binary(Freq),
+    BinDate = date_to_binary(Date),
+    BinTime = time_to_binary(Time),
+    <<"  ", Name/binary, "(",  BinFreq/binary, ") starting on ", BinDate/binary,
+      " at ", BinTime/binary>>.
+
+handle_delete_(Name) ->
+    ApiServer = discord_sup:get_api_server(),
+    case get_schedule_entry(Name) of
+        {ok, _Entry} ->
+            ok = delete_entry(Name),
+            RoleId = get_role_id(Name),
+            Gateway = discord_sup:get_gateway(),
+            {ok, GuildId} = discord_gateway:guild_id(Gateway),
+            discord_api:delete_role(ApiServer, GuildId, RoleId);
+        E={error, _} -> E
+    end.
+
+get_schedule_entry(Name) ->
+    Fn = fun() -> mnesia:read({schedule_entry, Name}) end,
+    case mnesia:activity(transaction, Fn) of
+        [E] -> {ok, E};
+        [_|_] -> {error, <<"multiple schedules found">>};
+        [] -> {error, <<"schedule doesn't exist">>}
+    end.
+
+delete_entry(Name) ->
+    Fn = fun() -> mnesia:delete({schedule_entry, Name}) end,
+    mnesia:activity(transaction, Fn).
