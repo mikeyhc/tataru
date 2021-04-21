@@ -5,6 +5,8 @@
 -export([install/0, uninstall/1, handle/2]).
 -export([init/1, handle_call/3, handle_cast/2]).
 
+-define(INTERVAL, 60000). % 1 minute
+
 -type frequency() :: oneoff | daily | weekly | monthly.
 
 -record(schedule_entry, {name :: binary(),
@@ -13,7 +15,11 @@
                          frequency :: frequency()
                         }).
 
+-record(state, {timer :: timer:tref() | undefined}).
+
 -define(REACTION, <<":ree:818301546831151114">>).
+-define(HOUR, 3600). % 60 * 60
+-define(TEN_MINUTES, 600). % 10 * 60
 
 %% API functions
 
@@ -45,7 +51,8 @@ handle_command(_Pid, [Cmd|_], Msg) ->
 %% gen_server callbacks
 
 init([]) ->
-    {ok, []}.
+    gen_server:cast(self(), start_timer),
+    {ok, #state{}}.
 
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
@@ -69,6 +76,18 @@ handle_cast({add, _, Msg}, State) ->
 handle_cast({react, Msg}, State) ->
     ?LOG_INFO("got react message: ~p~n", [Msg]),
     handle_react(Msg),
+    {noreply, State};
+handle_cast(start_timer, State) ->
+    if State#state.timer =/= undefined ->
+           timer:cancel(State#state.timer);
+       true -> ok
+    end,
+    {ok, TRef} = timer:apply_interval(?INTERVAL, gen_server, cast,
+                                      [self(), timer_tick]),
+    {noreply, State#state{timer=TRef}};
+handle_cast(timer_tick, State) ->
+    ?LOG_INFO("got timer tick"),
+    process_events(),
     {noreply, State};
 handle_cast(stop, State) ->
     {stop, normal, State}.
@@ -265,3 +284,29 @@ get_role_id(RoleName) ->
     FilterFn = fun(#{<<"name">> := Name}) -> RoleName =:= Name end,
     [#{<<"id">> := RoleId}] = lists:filter(FilterFn, get_roles()),
     RoleId.
+
+get_schedule_entries() ->
+    Fn = fun() ->
+        mnesia:foldl(fun(X, Acc) -> [X|Acc] end, [], schedule_entry)
+    end,
+    mnesia:activity(transaction, Fn).
+
+should_fire(Now, #schedule_entry{time=Time}) ->
+    Diff = abs(calendar:time_to_seconds(Now) - calendar:time_to_seconds(Time)),
+    if Diff >= ?HOUR andalso Diff =< ?HOUR - 60 -> true;
+       Diff >= ?TEN_MINUTES andalso Diff =< ?TEN_MINUTES - 60 -> true;
+       true -> false
+    end.
+
+process_events() ->
+    {_NDate, NTime} = calendar:local_time(),
+    Entries = get_schedule_entries(),
+    Current = lists:filter(fun(X) -> should_fire(NTime, X) end, Entries),
+    ChannelId = os:getenv("TATARU_SCHEDULE_CHANNEL"),
+    lists:foreach(fun(X) -> fire_alert(ChannelId, X) end, Current).
+
+fire_alert(ChannelId, #schedule_entry{name=Name, time=Time}) ->
+    RoleId = get_role_id(Name),
+    Alert = <<"<@!", RoleId/binary, "> comming up at ", Time/binary>>,
+    ApiServer = discord_sup:get_api_server(),
+    discord_api:send_message(ApiServer, ChannelId, Alert).
