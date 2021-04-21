@@ -15,19 +15,21 @@
 %% API functions
 
 install() ->
-    UserEnv = os:getenv("TATARU_AUTHORIZED", ""),
-    AuthUsers = lists:map(fun binary:list_to_bin/1,
-                          lists:filter(fun(X) -> X =/= "" end,
-                                       string:split(UserEnv, ";"))),
-    {ok, Pid} = gen_server:start_link(?MODULE, [AuthUsers], []),
+    AuthUsers = parse_envvar("TATARU_AUTHORIZED"),
+    DefaultPlugins = parse_envvar("TATARU_PLUGINS"),
+    {ok, Pid} = gen_server:start_link(?MODULE, [AuthUsers, DefaultPlugins], []),
     Pid.
 
-handle(Pid, Msg) ->
-    gen_server:cast(Pid, {msg, Msg}).
+handle(Pid, {msg, Msg}) ->
+    gen_server:cast(Pid, {msg, Msg});
+handle(_Pid, {react, _}) ->
+    ok.
 
 %% gen_server callbacks
 
-init([AuthUsers]) ->
+init([AuthUsers, DefaultPlugins]) ->
+    lists:foreach(fun(P) -> gen_server:cast(self(), {default, P}) end,
+                  DefaultPlugins),
     {ok, #state{authorized_users=AuthUsers}}.
 
 handle_call(_Msg, _From, State) ->
@@ -43,9 +45,13 @@ handle_cast({msg, Msg}, State=#state{authorized_users=AuthUsers}) ->
             authorized_command(remove_plugin, AuthUsers, Msg, [Rest, Msg]);
         [_, <<"plugin">>, <<"list">>] ->
             list_plugins(Msg);
-        _ ->
-            ?LOG_INFO("unmatched command: ~p", [Parts])
+        _ -> ok
     end,
+    {noreply, State};
+handle_cast({default, Plugin}, State) ->
+    {ok, APlugin} = atom_plugin(Plugin),
+    PluginServer = tataru_sup:get_plugin_server(),
+    ok = plugin_server:add_plugin(PluginServer, APlugin),
     {noreply, State}.
 
 %% helper functions
@@ -124,3 +130,8 @@ list_plugins(Msg) ->
     PluginBin = lists:foldl(fun binjoin/2, <<>>,
                             lists:join(<<", ">>, BinPlugins)),
     send_reply(<<"Installed: ", PluginBin/binary>>, Msg).
+
+parse_envvar(EnvVar) ->
+    lists:map(fun binary:list_to_bin/1,
+              lists:filter(fun(X) -> X =/= "" end,
+                           string:split(os:getenv(EnvVar, ""), ";"))).

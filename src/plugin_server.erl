@@ -1,7 +1,7 @@
 -module(plugin_server).
 -behaviour(gen_server).
 
--export([start_link/0, broadcast/2]).
+-export([start_link/0, broadcast/2, broadcast_react/2]).
 -export([add_plugin/2, remove_plugin/2, list_plugins/1]).
 -export([init/1, handle_call/3, handle_cast/2]).
 
@@ -16,6 +16,10 @@ start_link() ->
 -spec broadcast(pid(), #{any() => any()}) -> ok.
 broadcast(Pid, Msg) ->
     gen_server:cast(Pid, {broadcast, Msg}).
+
+-spec broadcast_react(pid(), #{any() => any()}) -> ok.
+broadcast_react(Pid, Msg) ->
+    gen_server:cast(Pid, {broadcast_react, Msg}).
 
 -spec add_plugin(pid(), atom()) -> ok | {error, already_installed}.
 add_plugin(Pid, Plugin) ->
@@ -61,6 +65,10 @@ handle_cast(initialize, State) ->
     Init = plugin_handler:install(),
     {noreply, State#state{plugins=#{plugin_handler => Init}}};
 handle_cast({broadcast, Msg}, State) ->
-    lists:foreach(fun({M, V}) -> M:handle(V, Msg) end,
+    lists:foreach(fun({M, V}) -> M:handle(V, {msg, Msg}) end,
+                  maps:to_list(State#state.plugins)),
+    {noreply, State};
+handle_cast({broadcast_react, Msg}, State) ->
+    lists:foreach(fun({M, V}) -> M:handle(V, {react, Msg}) end,
                   maps:to_list(State#state.plugins)),
     {noreply, State}.

@@ -2,7 +2,7 @@
 -behaviour(gen_statem).
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/1, heartbeat/1]).
+-export([start_link/1, heartbeat/1, guild_id/1, user_id/1]).
 -export([callback_mode/0, init/1]).
 -export([await_connect/3, await_hello/3, await_dispatch/3, connected/3,
          await_ack/3, disconnected/3, await_reconnect/3, await_close/3]).
@@ -18,7 +18,8 @@
                 connection :: #connection{} | undefined,
                 heartbeat :: discord_heartbeat:ref() | undefined,
                 user_id :: binary() | undefined,
-                sequence :: integer() | undefined,
+                guild_id :: binary() | undefined,
+                sequence :: integer() | null | undefined,
                 session_id :: binary() | undefined,
                 log :: file:io_device() | undefined
                }).
@@ -33,6 +34,14 @@ start_link(Token) ->
 heartbeat(Pid) ->
     gen_statem:cast(Pid, heartbeat),
     ok.
+
+-spec guild_id(pid()) -> {ok, binary()}.
+guild_id(Pid) ->
+    gen_statem:call(Pid, guild_id).
+
+-spec user_id(pid()) -> {ok, binary()}.
+user_id(Pid) ->
+    gen_statem:call(Pid, user_id).
 
 %% gen_statem callbacks
 
@@ -95,6 +104,10 @@ connected(cast, heartbeat,
     ?LOG_INFO("sending heartbeat"),
     send_message(Connection, 1, Seq),
     {next_state, await_ack, S};
+connected({call, From}, guild_id, State=#state{guild_id=GuildId}) ->
+    {keep_state, State, [{reply, From, {ok, GuildId}}]};
+connected({call, From}, user_id, State=#state{user_id=UserId}) ->
+    {keep_state, State, [{reply, From, {ok, UserId}}]};
 connected(info, {gun_ws, ConnPid, _StreamRef, {text, Msg}},
           S=#state{connection=#connection{pid=ConnPid}, log=Log}) ->
     Json = jsone:decode(Msg),
@@ -187,7 +200,27 @@ decode_msg(Msg, #state{log=Log}) ->
 handle_ws_message(Msg=#{<<"op">> := Op, <<"s">> := Seq}, State) ->
     handle_ws_message_(Op, Msg, State#state{sequence=Seq}).
 
-handle_ws_message_(0, #{<<"d">> := Msg}, S0) ->
+update_session_id(Msg, S0) ->
+    case maps:get(<<"session_id">>, Msg, undefined) of
+        undefined -> S0;
+        SessionId -> S0#state{session_id=SessionId}
+    end.
+
+handle_ws_message_(0, M=#{<<"t">> := <<"GUILD_CREATE">>, <<"d">> := Msg}, S0) ->
+    #{<<"id">> := GuildId} = Msg,
+    ?LOG_INFO("setting guild_id to ~p", [GuildId]),
+    S1 = S0#state{guild_id = GuildId},
+    update_session_id(M, S1);
+handle_ws_message_(0, M=#{<<"t">> := <<"MESSAGE_REACTION_ADD">>,
+                          <<"d">> := Msg}, S0) ->
+    PluginServer = tataru_sup:get_plugin_server(),
+    #{<<"user_id">> := UserId} = Msg,
+    if UserId =:= S0#state.user_id -> ok;
+       true ->
+           plugin_server:broadcast_react(PluginServer, Msg)
+    end,
+    update_session_id(M, S0);
+handle_ws_message_(0, M=#{<<"d">> := Msg}, S0) ->
     % TODO compare session ids
     % TODO ensure we only use a single session ID
     S1 = if S0#state.user_id =:= undefined ->
@@ -201,10 +234,7 @@ handle_ws_message_(0, #{<<"d">> := Msg}, S0) ->
        true -> S0
     end,
     handle_mentions(Msg, S1),
-    case maps:get(<<"session_id">>, Msg, undefined) of
-        undefined -> S1;
-        SessionId -> S1#state{session_id=SessionId}
-    end;
+    update_session_id(M, S1);
 handle_ws_message_(7, _Msg, State) ->
     disconnect(State#state.connection, 1001, <<"reconnect">>),
     gen_statem:cast(self(), reconnect),
@@ -258,13 +288,14 @@ connect(Next, State) ->
     after 2000 -> {stop, timeout}
     end.
 
+handle_mentions(#{<<"author">> := #{<<"id">> := UID}}, #state{user_id=UID}) ->
+    ok;
 handle_mentions(Msg=#{<<"mentions">> := Mentions}, #state{user_id=UID}) ->
     Me = lists:filter(fun(#{<<"id">> := ID}) -> ID =:= UID end, Mentions),
     if length(Me) > 0 ->
            PluginServer = tataru_sup:get_plugin_server(),
            plugin_server:broadcast(PluginServer, Msg);
        true -> ok
-    end,
-    ok;
+    end;
 handle_mentions(_Msg, _State) ->
     ok.
