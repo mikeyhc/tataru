@@ -1,4 +1,4 @@
-# tataru
+# tataru [![Erlang CI](https://github.com/mikeyhc/tataru/actions/workflows/erlang.yml/badge.svg)](https://github.com/mikeyhc/tataru/actions/workflows/erlang.yml)
 A discord scheduling bot
 
 # Running
