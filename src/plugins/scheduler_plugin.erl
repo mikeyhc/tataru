@@ -321,18 +321,18 @@ alert_today(Today, #schedule_entry{date=Date, frequency=oneoff}) ->
 alert_today(Today, #schedule_entry{date=Date, frequency=daily}) ->
     TSec = calendar:date_to_gregorian_days(Today),
     DSec = calendar:date_to_gregorian_days(Date),
-    DSec - TSec >= 0;
+    TSec - DSec >= 0;
 alert_today(Today, #schedule_entry{date=Date, frequency=weekly}) ->
     TSec = calendar:date_to_gregorian_days(Today),
     DSec = calendar:date_to_gregorian_days(Date),
     TDay = calendar:day_of_week(Today),
     DDay = calendar:day_of_week(Date),
-    DSec - TSec >= 0 andalso TDay =:= DDay;
+    TSec - DSec >= 0 andalso TDay =:= DDay;
 alert_today(Today={_, _, TD}, #schedule_entry{date=Date, frequency=monthly}) ->
     {_, _, DD} = Date,
     TSec = calendar:date_to_gregorian_days(Today),
     DSec = calendar:date_to_gregorian_days(Date),
-    DSec - TSec >= 0 andalso TD =:= DD.
+    TSec - DSec >= 0 andalso TD =:= DD.
 
 should_fire({NDate, NTime}, S=#schedule_entry{name=Name, time=Time}) ->
     case alert_today(NDate, S) of
@@ -347,7 +347,7 @@ should_fire({NDate, NTime}, S=#schedule_entry{name=Name, time=Time}) ->
             end;
         false ->
             ?LOG_INFO("alert ~s is NOT scheduled for today", [Name]),
-            ok
+            false
     end.
 
 process_events() ->
