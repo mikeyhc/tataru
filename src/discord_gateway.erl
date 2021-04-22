@@ -179,10 +179,11 @@ await_reconnect(info, {gun_ws, ConnPid, StreamRef, {text, Msg}},
     case Json of
         #{<<"op">> := 10} ->
             ?LOG_INFO("sending resume"),
-            send_message(ConnPid, 6, #{<<"token">> => Token,
-                                       <<"session_id">> => SessionId,
-                                       <<"seq">> => Seq
-                                      }),
+            send_message(S#state.connection, 6,
+                         #{<<"token">> => Token,
+                           <<"session_id">> => SessionId,
+                           <<"seq">> => Seq
+                          }),
             {next_state, await_dispatch, handle_ws_message(Json, S)};
         _ -> {stop, msg_before_hello, S}
     end;
