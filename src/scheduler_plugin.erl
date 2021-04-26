@@ -25,8 +25,7 @@
 
 install() ->
     install_tables(),
-    {ok, Pid} = gen_server:start_link(?MODULE, [], []),
-    Pid.
+    gen_server:start_link(?MODULE, [], []).
 
 uninstall(Pid) ->
     gen_server:cast(Pid, stop).
@@ -261,6 +260,7 @@ create_role(Name) ->
     ApiServer = discord_sup:get_api_server(),
     discord_api:create_role(ApiServer, GuildId, Name).
 
+handle_react(#{<<"emoji">> := #{<<"id">> := null}}) -> ok;
 handle_react(#{<<"user_id">> := UserId,
                <<"message_id">> := MessageId,
                <<"channel_id">> := ChannelId,
