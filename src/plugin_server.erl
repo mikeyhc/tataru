@@ -42,19 +42,19 @@ init([]) ->
 handle_call({add_plugin, Name}, _From, S0) ->
     Plugins = S0#state.plugins,
     {R, State} = case maps:is_key(Name, Plugins) of
-                     true -> {error, already_installed};
+                     true -> {{error, already_installed}, S0};
                      false ->
-                         Init = apply(Name, install, []),
+                         {ok, Init} = plugin_sup:start_plugin(Name),
                          {ok, S0#state{plugins=Plugins#{Name => Init}}}
                  end,
     {reply, R, State};
 handle_call({remove_plugin, Name}, _From, S0) ->
     Plugins = S0#state.plugins,
     {R, State} = case maps:is_key(Name, Plugins) of
-                     false -> {error, not_installed};
+                     false -> {{error, not_installed}, S0};
                      true ->
                          Init = maps:get(Name, Plugins),
-                         apply(Name, uninstall, [Init]),
+                         plugin_sup:stop_plugin(Name, Init),
                          {ok, S0#state{plugins=maps:remove(Name, Plugins)}}
                  end,
     {reply, R, State};
@@ -62,7 +62,7 @@ handle_call(list_plugins, _From, State) ->
     {reply, {ok, maps:keys(State#state.plugins)}, State}.
 
 handle_cast(initialize, State) ->
-    Init = plugin_handler:install(),
+    {ok, Init} = plugin_sup:start_plugin(plugin_handler),
     {noreply, State#state{plugins=#{plugin_handler => Init}}};
 handle_cast({broadcast, Msg}, State) ->
     lists:foreach(fun({M, V}) -> M:handle(V, {msg, Msg}) end,

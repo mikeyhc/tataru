@@ -34,6 +34,9 @@ init([DiscordUrl, DiscordToken]) ->
                     start => {discord_sup, start_link,
                               [DiscordUrl, DiscordToken]},
                     type => supervisor},
+                  #{id => plugin_sup,
+                    start => {plugin_sup, start_link, []},
+                    type => supervisor},
                   #{id => plugin_server,
                     start => {plugin_server, start_link, []}}],
     {ok, {SupFlags, ChildSpecs}}.
