@@ -343,6 +343,7 @@ should_fire({NDate, NTime}, S=#schedule_entry{name=Name, time=Time}) ->
             ?LOG_INFO("alert ~s has time diff ~p", [Name, Diff]),
             if Diff =< ?HOUR + 60 andalso Diff > ?HOUR -> true;
                Diff =< ?TEN_MINUTES + 60 andalso Diff > ?TEN_MINUTES -> true;
+               Diff =< 60 andalso Diff > 0 -> true;
                true -> false
             end;
         false ->
@@ -350,18 +351,28 @@ should_fire({NDate, NTime}, S=#schedule_entry{name=Name, time=Time}) ->
             false
     end.
 
+time_name(NTime, Time) ->
+    Diff = calendar:time_to_seconds(Time) - calendar:time_to_seconds(NTime),
+    if Diff =< ?HOUR + 60 andalso Diff > ?HOUR ->
+           <<"in an hour">>;
+       Diff =< ?TEN_MINUTES + 60 andalso Diff > ?TEN_MINUTES ->
+           <<" in 10 minutes">>;
+       Diff =< 60 andalso Diff > 0 ->
+           <<"now!">>
+    end.
+
 process_events() ->
     Now = calendar:local_time(),
     Entries = get_schedule_entries(),
     Current = lists:filter(fun(X) -> should_fire(Now, X) end, Entries),
     ChannelId = binary:list_to_bin(os:getenv("TATARU_SCHEDULE_CHANNEL")),
-    lists:foreach(fun(X) -> fire_alert(ChannelId, X) end, Current).
+    lists:foreach(fun(X) -> fire_alert(ChannelId, Now, X) end, Current).
 
-fire_alert(ChannelId, #schedule_entry{name=Name, time=Time}) ->
+fire_alert(ChannelId, Now, #schedule_entry{name=Name, time=Time}) ->
     ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
-    TimeBin = time_to_binary(Time),
-    Alert = <<"<@&", RoleId/binary, "> coming up at ", TimeBin/binary>>,
+    TimeName = time_name(Now, Time),
+    Alert = <<"<@&", RoleId/binary, "> coming up at ", TimeName/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
 
