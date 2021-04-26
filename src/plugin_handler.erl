@@ -17,8 +17,7 @@
 install() ->
     AuthUsers = parse_envvar("TATARU_AUTHORIZED"),
     DefaultPlugins = parse_envvar("TATARU_PLUGINS"),
-    {ok, Pid} = gen_server:start_link(?MODULE, [AuthUsers, DefaultPlugins], []),
-    Pid.
+    gen_server:start_link(?MODULE, [AuthUsers, DefaultPlugins], []).
 
 handle(Pid, {msg, Msg}) ->
     gen_server:cast(Pid, {msg, Msg});
