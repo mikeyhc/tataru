@@ -87,6 +87,7 @@ await_dispatch(info, {gun_ws, ConnPid, _StreamRef, {text, Msg}},
             ?LOG_INFO("session invalidated, doing full reconnect"),
             demonitor(S#state.connection#connection.ref),
             gun:shutdown(ConnPid),
+            discord_heartbeat:remove_heartbeat(S#state.heartbeat),
             gen_statem:cast(self(), connect),
             {next_state, await_close, #state{token=S#state.token}}
     end;
@@ -158,6 +159,7 @@ await_ack(info, {gun_ws, ConnPid, _, {close, _, _}},
 await_ack(cast, heartbeat, State=#state{connection=Conn}) ->
     ?LOG_INFO("received heartbeat while awaiting ack, disconnecting"),
     disconnect(Conn, 1001, <<"no heartbeat">>),
+    discord_heartbeat:remove_heartbeat(State#state.heartbeat),
     gen_statem:cast(self(), reconnect),
     {next_state, disconnected, State#state{connection=undefined}}.
 
@@ -238,6 +240,7 @@ handle_ws_message_(0, M=#{<<"d">> := Msg}, S0) ->
     update_session_id(M, S1);
 handle_ws_message_(7, _Msg, State) ->
     disconnect(State#state.connection, 1001, <<"reconnect">>),
+    discord_heartbeat:remove_heartbeat(State#state.heartbeat),
     gen_statem:cast(self(), reconnect),
     State#state{connection=undefined};
 handle_ws_message_(10, #{<<"d">> := #{<<"heartbeat_interval">> := IV}},
