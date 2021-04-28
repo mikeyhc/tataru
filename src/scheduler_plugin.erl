@@ -368,10 +368,10 @@ process_events() ->
     ChannelId = binary:list_to_bin(os:getenv("TATARU_SCHEDULE_CHANNEL")),
     lists:foreach(fun(X) -> fire_alert(ChannelId, Now, X) end, Current).
 
-fire_alert(ChannelId, Now, #schedule_entry{name=Name, time=Time}) ->
+fire_alert(ChannelId, {_NDate, NTime}, #schedule_entry{name=Name, time=Time}) ->
     ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
-    TimeName = time_name(Now, Time),
+    TimeName = time_name(NTime, Time),
     Alert = <<"<@&", RoleId/binary, "> coming up at ", TimeName/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
