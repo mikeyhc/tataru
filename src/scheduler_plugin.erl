@@ -273,7 +273,11 @@ handle_react(#{<<"user_id">> := UserId,
     React = <<":", EmojiName/binary, ":", EmojiId/binary>>,
     if React =:= ?REACTION ->
            case schedule_message(ChannelId, MessageId) of
-               {true, Schedule} -> grant_role(GuildId, UserId, Schedule);
+               {true, Schedule} ->
+                   case schedule_exists(Schedule) of
+                       true -> grant_role(GuildId, UserId, Schedule);
+                       false -> ok
+                   end;
                false -> ok
            end;
        true -> ok
@@ -300,6 +304,13 @@ parse_schedule_message(ScheduleParts) ->
             {true, lists:foldl(fun(A, B) -> <<B/binary, A/binary>> end, <<>>,
                                lists:join(<<" ">>, lists:reverse(Rest)))};
         _ -> false
+    end.
+
+schedule_exists(Name) ->
+    Fn = fun() -> mnesia:read({schedule_entry, Name}) end,
+    case mnesia:activity(transaction, Fn) of
+        [] -> false;
+        [_|_] -> true
     end.
 
 grant_role(GuildId, UserId, RoleName) ->
