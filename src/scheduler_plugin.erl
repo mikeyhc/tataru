@@ -194,10 +194,10 @@ validate_date(Date) ->
 parse_freq(Freq) ->
     validate_freq(string:to_lower(binary:bin_to_list(Freq))).
 
-validate_freq(<<"oneoff">>) -> {ok, oneoff};
-validate_freq(<<"daily">>) -> {ok, daily};
-validate_freq(<<"weekly">>) -> {ok, weekly};
-validate_freq(<<"monthly">>) -> {ok, monthly};
+validate_freq("oneoff") -> {ok, oneoff};
+validate_freq("daily") -> {ok, daily};
+validate_freq("weekly") -> {ok, weekly};
+validate_freq("monthly") -> {ok, monthly};
 validate_freq(_) -> {error, <<"invalid frequency">>}.
 
 install_tables() ->
