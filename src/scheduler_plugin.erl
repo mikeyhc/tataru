@@ -45,8 +45,8 @@ handle_command(Pid, [<<"add">>|Rest], Msg) ->
     gen_server:cast(Pid, {add, Rest, Msg});
 handle_command(Pid, [<<"list">>|_], Msg) ->
     gen_server:cast(Pid, {list, Msg});
-handle_command(Pid, [<<"delete">>, Name], Msg) ->
-    gen_server:cast(Pid, {delete, Name, Msg});
+handle_command(Pid, [<<"delete">>, First|Rest], Msg) ->
+    gen_server:cast(Pid, {delete, [First|Rest], Msg});
 handle_command(_Pid, [Cmd|_], Msg) ->
     send_reply(<<"unknown command: ", Cmd/binary>>, Msg),
     send_help(Msg).
@@ -85,7 +85,9 @@ handle_cast({list, Msg}, State) ->
     Reply = lists:foldl(BinJoin, <<"Current Schedules:">>, BinEntries),
     send_reply(Reply, Msg),
     {noreply, State};
-handle_cast({delete, Name, Msg}, State) ->
+handle_cast({delete, Parts, Msg}, State) ->
+    Name = lists:foldl(fun(A, B) -> <<B/binary, A/binary>> end, <<>>,
+                       lists:join(<<" ">>, Parts)),
     case handle_delete_(Name) of
         ok -> send_reply(<<"schedule ", Name/binary, " deleted">>, Msg);
         {error, Error} ->
