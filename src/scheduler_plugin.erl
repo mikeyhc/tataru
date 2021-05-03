@@ -327,8 +327,8 @@ alert_today(Today, #schedule_entry{date=Date, frequency=daily}) ->
 alert_today(Today, #schedule_entry{date=Date, frequency=weekly}) ->
     TSec = calendar:date_to_gregorian_days(Today),
     DSec = calendar:date_to_gregorian_days(Date),
-    TDay = calendar:day_of_week(Today),
-    DDay = calendar:day_of_week(Date),
+    TDay = calendar:day_of_the_week(Today),
+    DDay = calendar:day_of_the_week(Date),
     TSec - DSec >= 0 andalso TDay =:= DDay;
 alert_today(Today={_, _, TD}, #schedule_entry{date=Date, frequency=monthly}) ->
     {_, _, DD} = Date,
