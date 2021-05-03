@@ -117,9 +117,9 @@ handle_add_(Name, Time, Date, Freq) ->
         true ->
             {error, <<"there is already a role with that name!">>};
         false ->
-            ok = create_role(Name),
             case build_entry(Name, Time, Date, Freq) of
                 {ok, Entry} ->
+                    ok = create_role(Name),
                     add_entry(Entry);
                 E -> E
             end
