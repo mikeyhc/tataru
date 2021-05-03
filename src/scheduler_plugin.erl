@@ -106,6 +106,7 @@ handle_cast(start_timer, State) ->
 handle_cast(timer_tick, State) ->
     ?LOG_INFO("got timer tick"),
     process_events(),
+    remove_stale_events(),
     {noreply, State};
 handle_cast(stop, State) ->
     {stop, normal, State}.
@@ -318,6 +319,11 @@ get_schedule_entries() ->
     end,
     mnesia:activity(transaction, Fn).
 
+get_oneoff_entries() ->
+    Entries = get_schedule_entries(),
+    lists:filter(fun(#schedule_entry{frequency=Freq}) -> Freq =:= oneoff end,
+                 Entries).
+
 alert_today(Today, #schedule_entry{date=Date, frequency=oneoff}) ->
     Date =:= Today;
 alert_today(Today, #schedule_entry{date=Date, frequency=daily}) ->
@@ -370,11 +376,26 @@ process_events() ->
     ChannelId = binary:list_to_bin(os:getenv("TATARU_SCHEDULE_CHANNEL")),
     lists:foreach(fun(X) -> fire_alert(ChannelId, Now, X) end, Current).
 
+remove_stale_events() ->
+    Now = calendar:local_time(),
+    Entries = get_oneoff_entries(),
+    Past = lists:filter(fun(E) -> entry_in_past(Now, E) end, Entries),
+    RemoveFn = fun(#schedule_entry{name=Name}) ->
+                       ?LOG_INFO("removing old oneoff entry ~s", [Name]),
+                       delete_entry(Name)
+               end,
+    lists:foreach(RemoveFn, Past).
+
+entry_in_past(Now, #schedule_entry{date=Date, time=Time}) ->
+    D0 = calendar:datetime_to_gregorian_seconds({Date, Time}),
+    D1 = calendar:datetime_to_gregorian_seconds(Now),
+    D0 - D1 < 0.
+
 fire_alert(ChannelId, {_NDate, NTime}, #schedule_entry{name=Name, time=Time}) ->
     ?LOG_INFO("firing alert ~s", [Name]),
     RoleId = get_role_id(Name),
     TimeName = time_name(NTime, Time),
-    Alert = <<"<@&", RoleId/binary, "> coming up at ", TimeName/binary>>,
+    Alert = <<"<@&", RoleId/binary, "> coming up ", TimeName/binary>>,
     ApiServer = discord_sup:get_api_server(),
     discord_api:send_message(ApiServer, ChannelId, Alert).
 
