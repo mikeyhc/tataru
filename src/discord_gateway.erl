@@ -122,6 +122,7 @@ connected(info, {gun_ws, ConnPid, _StreamRef, {text, Msg}},
 connected(info, {gun_down, ConnPid, _, _, _},
           S=#state{connection=#connection{pid=ConnPid}}) ->
     ?LOG_INFO("gun connection lost"),
+    % TODO close connection and reconnect
     gun:await_up(ConnPid),
     ?LOG_INFO("gun connection regained"),
     gun:ws_upgrade(ConnPid, "/"),

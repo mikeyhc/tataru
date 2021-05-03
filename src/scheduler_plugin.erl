@@ -382,7 +382,7 @@ remove_stale_events() ->
     Past = lists:filter(fun(E) -> entry_in_past(Now, E) end, Entries),
     RemoveFn = fun(#schedule_entry{name=Name}) ->
                        ?LOG_INFO("removing old oneoff entry ~s", [Name]),
-                       delete_entry(Name)
+                       handle_delete_(Name)
                end,
     lists:foreach(RemoveFn, Past).
 
